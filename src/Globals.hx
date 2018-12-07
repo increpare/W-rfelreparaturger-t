@@ -8,7 +8,6 @@ import js.Browser;
 
 class Globals
 {
-    public static var level:Int=0;
 
     public static function mPlayNote(seed:Int,frequency:Float,length:Float,volume:Float){
         #if js
@@ -18,7 +17,7 @@ class Globals
 
   public static var state = {
       sprache:0,
-      audio:0,
+      audio:1,
       level:0,
       solved:[0,0,0,0,0,0]
   };

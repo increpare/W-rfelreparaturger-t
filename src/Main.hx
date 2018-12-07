@@ -1,3 +1,4 @@
+import haxe.ds.Vector;
 import js.html.svg.AnimatedBoolean;
 import haxegon.*;
 import utils.*;
@@ -27,6 +28,32 @@ class Verbindung{
 		this.ox=ox;
 		this.oy=oy;
 		this.dir=dir;
+	}
+
+	public function tx():Int{
+		switch(dir){
+			case up:
+				return tx;
+			case upright:
+				return tx+1;
+			case right:
+				return tx+1;
+			case downright:
+				return tx+1;
+		}
+	}
+
+	public function ty():Int{
+		switch(dir){
+			case up:
+				return ty-1;
+			case upright:
+				return ty-1;
+			case right:
+				return tx;
+			case downright:
+				return tx+1;
+		}
 	}
 }
 
@@ -129,12 +156,100 @@ class Stuck {
 		return true;
 	}
 
+	private static function min(a:Int,b:Int){
+		return a<b?a:b;
+	}
+
+	public function connected(rx1:Int,ry1:Int, rx2:Int, ry2:Int):Bool{
+		//flood fill?
+
+		var w = mask[0].length;
+		var h = mask.length;
+
+		var colors = new haxe.ds.Vector<Int>(w*h);
+		for (i in 0...w*h){
+			colors[i]=i;
+		}
+
+		var changed=true;
+		while(changed){			
+			changed=false;
+			for (verbindung in verbindungen){
+				var sx = verbindung.ox;
+				var sy = verbindung.oy;
+				var tx = verbindung.tx();				
+				var ty = verbindung.ty();
+
+				var c1 = colors[sx+w*sy];
+				var c2 = colors[tx+w*ty];
+				if (c1!=c2){
+					var m = min(c1,c2);
+					colors[sx+w*sy]=m;
+					colors[tx+w*ty]=m;
+					changed=true;
+				}
+			}	
+		}
+		return colors[rx1+w*ry1]==colors[rx2+w*ry2];
+	}
+
 	public function recalc(){
 		verbindungen=[];
-		for (i in 0...mask[0].length){
 
+
+		var w = mask[0].length;
+		var h = mask.length;
+
+		//erst, recht
+		for (j in 0...h){
+			for (i in 0...(w-1)){
+				if if (mask[j].charAt[i]=="O" && mask[j].charAt[i+1]=="O"){
+					verbindungen.push( new Verbindung(i,j,VerbindungDir.right) );
+				}
+			}
 		}
+
+		
+		
+		//dann, obenwarts
+		for (j in 1...h) ){
+			for (i in 0...w){				
+				var tx = i;
+				var ty = j-1;
+				if if (mask[ty].charAt[tx]=="O" && mask[ty].charAt[tx]=="O"
+				&& connected(i,j,tx,ty)){
+					verbindungen.push( new Verbindung(i,j,VerbindungDir.up) );
+				}
+			}
+		}
+
+		//diagonal obenrechts
+		for (j in 1...h) ){
+			for (i in 0...(w-1)){				
+				var tx = i+1;
+				var ty = j-1;
+				if if (mask[ty].charAt[tx]=="O" && mask[ty].charAt[tx]=="O"
+				&& connected(i,j,tx,ty)){
+					verbindungen.push( new Verbindung(i,j,VerbindungDir.upright) );
+				}
+			}
+		}
+
+		//diagonal untenrechts
+		for (j in 0...(h-1)) ){
+			for (i in 0...(w-1)){				
+				var tx = i+1;
+				var ty = j+1;
+				if if (mask[ty].charAt[tx]=="O" && mask[ty].charAt[tx]=="O"
+				&& connected(i,j,tx,ty)){
+					verbindungen.push( new Verbindung(i,j,VerbindungDir.downright) );
+				}
+			}
+		}
+
+		trace(verbindungen);
 	}
+
 }
 
 class Brett {
@@ -142,11 +257,89 @@ class Brett {
 }
 
 class Main {	
+	public static var levels:Array<Array<String>> = [
+		[	
+			"  11   9 ",
+			"   1   9 ",
+			"  88  3  ",
+			"  88     ",
+			"     22  ",
+			" 4  0    ",
+			"   00 7  ",
+			"   5  67 ",
+			"         ",
+		],
+		[	
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+		],
+		[	
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+		],
+		[	
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+		],
+		[	
+			"         ",
+			"         ",
+			"    1    ",
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+			"         ",
+		],
+		[	
+			"         ",
+			"  1      ",
+			"         ",
+			"         ",
+			"      1  ",
+			"         ",
+			"  1      ",
+			"         ",
+			"         ",
+		],
+
+
+	]
 	
 	var darkmodeenter=false;
 
 	function setup(){
+		Globals.state.level=Save.loadvalue("level",0);
+		Globals.state.audio=Save.loadvalue("audio",1);
+
+		for(i in 0...6){
+			Globals.state.solved[i]=Save.loadvalue("solved"+i,0);
 		}
+
+		LoadLevel(level);	
+	}
 
 	function reset(){
 		setup();
@@ -176,6 +369,7 @@ class Main {
 			: Globals.S("Die Würfel sind falsch!","The dice are wrong.")
 			;
 			
+
 		Text.display(t_x,t_y,title_s,0x47656c);	
 
 		var feld_x=17;
@@ -191,13 +385,16 @@ class Main {
 			"audio",
 			"button",
 			"button_pressed",
-			"button_audio_on",
 			"button_audio_stumm",
+			"button_audio_on",
 			144,
 			11,
 			Globals.state.audio==0 ?false:true
 		);
-		Globals.state.audio = newbuttonstate?1:0;
+		if (Globals.state.audio!=newbuttonstate?1:0){
+			Globals.state.audio = newbuttonstate?1:0;
+			Save.savevalue("audio",Globals.state.audio);
+		}
 	
 		newbuttonstate = IMGUI.togglebutton(
 			"sprache",
@@ -209,7 +406,10 @@ class Main {
 			32,
 			Globals.state.sprache==0 ?false:true
 		);
-		Globals.state.sprache = newbuttonstate?1:0;
+		if (Globals.state.sprache!=newbuttonstate?1:0){
+			Globals.state.sprache = newbuttonstate?1:0;
+			Save.savevalue("sprache",Globals.state.sprache);
+		}
 	
 	//13,219
 		var linkspressed = IMGUI.pressbutton(
@@ -235,11 +435,13 @@ class Main {
 		if (linkspressed){
 			if (Globals.state.level>0){
 				Globals.state.level--;
+				Save.savevalue("level",Globals.state.level);
 			}
 		}
 		if (rechtspressed){
 			if (Globals.state.level<5){
 				Globals.state.level++;
+				Save.savevalue("level",Globals.state.level);
 			}
 		}
 //38,218, 54
