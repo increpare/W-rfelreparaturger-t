@@ -4,6 +4,8 @@ import js.html.svg.AnimatedBoolean;
 import haxegon.*;
 import utils.*;
 import StringTools;
+import haxe.Serializer;
+import haxe.Unserializer;
 
 class Punkt{
 	public var x:Int;
@@ -52,9 +54,9 @@ class Verbindung{
 			case upright:
 				return oy-1;
 			case right:
-				return ox;
+				return oy;
 			case downright:
-				return ox+1;
+				return oy+1;
 		}
 	}
 }
@@ -84,6 +86,21 @@ class Stuck {
 	}
 	public static function intmin(a:Int,b:Int):Int{
 		return a<b?a:b;
+	}
+	public function neighbouring(x:Int,y:Int):Bool{
+		return 
+			hasPunkt(x-1,y-1) ||
+			hasPunkt(x-1,y+0) ||
+			hasPunkt(x-1,y+1) ||
+			
+			hasPunkt(x+0,y-1) ||
+			hasPunkt(x+0,y+0) ||
+			hasPunkt(x+0,y+1) ||
+
+			hasPunkt(x+1,y-1) ||
+			hasPunkt(x+1,y+0) ||
+			hasPunkt(x+1,y+1) ;
+			
 	}
 
 	public function overlap(o:Stuck):Array<Ueberzug>{
@@ -484,6 +501,7 @@ class Stuck {
 			}
 			rx++;
 			posx--;
+			w++;
 		} 
 		
 		while (rx>=w){
@@ -505,6 +523,7 @@ class Stuck {
 		while (ry<0){
 			posy--;
 			ry++;			
+			h++;
 			mask.unshift(candrow);		
 		} 
 		
@@ -589,7 +608,9 @@ class Stuck {
 				var tx = i;
 				var ty = j-1;
 				if (mask[j].charAt(i)=="O" && mask[ty].charAt(tx)=="O"
-				&& !connected(i,j,tx,ty)){
+				// && !connected(i,j,tx,ty)
+				)
+				{
 					verbindungen.push( new Verbindung(i,j,VerbindungDir.up) );
 				}
 			}
@@ -630,9 +651,152 @@ class Brett {
 	public function new(){
 		stuecke = new Array<Stuck>();
 	}
+
+	public function hasPunkt(x:Int,y:Int):Int{
+		for ( i in 0...stuecke.length){
+			var s = stuecke[i];
+			if (s.hasPunkt(x,y)){
+				return i;
+			}
+		}
+		return -1;
+	}
+
+
+	public function hasPunktIgnoreSelected(x:Int,y:Int,ignoreindex:Int):Int{
+		for ( i in 0...stuecke.length){
+			if (i==ignoreindex){
+				continue;
+			}
+			var s = stuecke[i];
+			if (s.hasPunkt(x,y)){
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	var legende_chars=["0","1","2","3","4","5","6","7","8","9","A","B","C","D","E","F","G","H","I","J","K","L",'M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z'];
+
+	public function ToString():String{
+		var result="\t\t[\n";
+		for (j in 0...9){
+			result+='\t\t\t"';
+			for (i in 0...9){
+				var indexGefunden = hasPunkt(i,j);
+				if (indexGefunden==-1){
+					result+=" ";
+				} else {
+					result+=legende_chars[indexGefunden];
+				}
+			}
+			result+='",\n';
+		}
+		
+		result+="\t\t],\n";
+
+		return result;
+	}
+
+	public function wouldOverlapAt(stueck_index:Int,cx:Int,cy:Int):Bool{
+		var stueck = stuecke[stueck_index];
+		var ox = stueck.posx;
+		var oy = stueck.posy;
+		stueck.posx=cx;
+		stueck.posy=cy;
+
+		var w = stueck.width();
+		var h = stueck.height();
+
+		var rightmostindex = cx+w-1;
+		var bottommostindex = cy+h-1;
+
+		//check if in bounds
+		if (cx<0||cy<0|| rightmostindex>8 || bottommostindex>8){
+			return true;
+		}
+
+		var overlaps:Bool=false;
+		for (i in 0...stuecke.length){
+			if (i==stueck_index){
+				continue;
+			}
+
+			var other=stuecke[i];
+			if (stueck.overlap(other).length>0){
+				overlaps=true;
+				break;
+			}
+		}
+		
+		stueck.posx=ox;
+		stueck.posy=oy;
+
+		return overlaps;
+	}
+
+	public function shuffle(){
+		var repeats=Random.int(50,60);
+		for (times in 0...repeats){
+			for (stueck_i in 0...stuecke.length){
+				var stueck = stuecke[stueck_i];
+				var w = stueck.width();
+				var h = stueck.height();
+				var positions=[];
+				for (i in 0...(9+1-w)){
+					for (j in 0...(9+1-h)){
+						if (wouldOverlapAt(stueck_i,i,j)==false){
+							positions.push([i,j]);
+						}
+					}
+				}
+				var newpos = Random.pick(positions);
+				stueck.posx=newpos[0];
+				stueck.posy=newpos[1];
+			}
+		}
+	}
 }
 
 class Main {	
+
+	private static function playSound(s:Int){
+		if (Globals.state.audio==0){
+			return;
+		}
+		untyped __js__('playSound({0},0.2)',s);
+	}
+
+	private var undostack=[];
+	private function doUndo(){
+		
+	    var serializer = new Serializer();
+		serializer.serialize(brett);
+		serializer.serialize(lastselected);
+		var curstate_s = serializer.toString();
+		
+		var i = undostack.length-1;
+		while (i>=0){
+			if (undostack[i]!=curstate_s){
+    			var unserializer = new Unserializer(undostack[i]);
+
+    			brett = unserializer.unserialize();
+    			lastselected = unserializer.unserialize();
+
+				return;
+			}
+			undostack.pop();
+			i--;
+		}
+		undostack=[curstate_s];
+	}
+	private function saveUndoState(){
+	    var serializer = new Serializer();
+		serializer.serialize(brett);
+		serializer.serialize(lastselected);
+		undostack.push(serializer.toString());
+	}
+
 	private var editmode=false;
 	private var lastselected=-1;
 
@@ -640,73 +804,76 @@ class Main {
 	private var selected_x_offset=0;
 	private var selected_y_offset=0;
 
-	public static var levels:Array<Array<String>> = [
-		[	
-			"4     77 ",
-			"4  33 777",
-			"   1   77",
-			" 21  5   ",
-			"  2 555  ",
-			"     5   ",
-			"6 6    88",
-			" 6    888",
-			"6 6   88 ",
-		],
-		[	
-			"  11   9 ",
-			"   1   9 ",
-			"  88  3  ",
-			"  88     ",
-			"     22  ",
-			" 4  0    ",
-			"   00 7  ",
-			"   5  67 ",
+	public static var levels:Array<Array<String>> = [		
+		[
+			"         ",
+			" 00 3  7 ",
+			" 0  3    ",
+			"         ",
+			" 11 4 66 ",
+			"         ",
+			"    5  8 ",
+			" 2  5 88 ",
 			"         ",
 		],
-		[	
-			"         ",
-			"         ",
-			"         ",
-			"         ",
-			"         ",
-			"         ",
-			"         ",
-			"         ",
-			"         ",
-		],
-		[	
-			"         ",
-			"         ",
-			"         ",
-			"         ",
-			"         ",
-			"         ",
-			"         ",
-			"         ",
+
+		[
+			"46    1  ",
+			"4 6  1   ",
+			" 4 61 3  ",
+			"  461  3 ",
+			"  00   3 ",
+			" 0   53  ",
+			"0 2  25  ",
+			"   22  5 ",
 			"         ",
 		],
-		[	
+		[
+			"2 FF GG 7",
+			" 0       ",
+			"E 01 DD C",
+			"E 1  DD C",
 			"         ",
+			"3 99 44 B",
+			"3 99 44 B",
 			"         ",
-			"    1    ",
-			"         ",
-			"         ",
-			"         ",
-			"         ",
+			"8 55 AA 6",
+		],	
+		[
+			"   4 0   ",
+			"   405   ",
+			"  4 05   ",
+			"44 1 05  ",
+			" 22 1 0  ",
+			"2332 11  ",
+			"   321   ",
 			"         ",
 			"         ",
 		],
-		[	
+			[
 			"         ",
-			"  1      ",
-			"         ",
-			"         ",
-			"      1  ",
-			"         ",
-			"  1      ",
-			"         ",
+			"    33   ",
+			"   3 5   ",
+			" 03 225  ",
+			" 0426425 ",
+			"  044 15 ",
+			"   0 1   ",
+			"   11    ",
 			"         ",
 		],
+
+			[
+			"         ",
+			" AA  4   ",
+			" A0 42   ",
+			"   09921 ",
+			"  3B 91  ",
+			" 35BB7   ",
+			"   56 78 ",
+			"   6  88 ",
+			"         ",
+		],
+
 
 
 	];
@@ -716,8 +883,9 @@ class Main {
 
 	public var brett:Brett;
 	function LoadLevel(l:Int){
+		solved=false;
 		var leveldat = levels[l];
-
+		lastselected=-1;
 		brett = new Brett();
 	
 		var found="";
@@ -742,7 +910,6 @@ class Main {
 					stueck.posy=j;
 					stueck.mask=["O"];					
 					brett.stuecke.push(stueck);
-					lastselected=brett.stuecke.length-1;
 					found = found+c;
 				}
 			}
@@ -752,7 +919,8 @@ class Main {
 			stuck.recalc();
 		}
 
-		trace(brett);
+		undostack=[];
+		saveUndoState();
 	}
 
 	function setup(){
@@ -782,46 +950,290 @@ class Main {
 	}	
 	
 	public var solved:Bool;
+	public var allsolved:Bool;
 	
 	public static var feld_x=17;
 	public static var feld_y=60;
 	public static var tile_s=16;
 
+	private static var outlines= [
+		"....O....",
+		"O.......O",
+		"..O...O..",
+		"O...O...O",
+		"..O.O.O..",
+		"O.O...O.O",
+		"O.O.O.O.O",
+		"O.OO.OO.O",
+		"OOO...OOO"
+	];
+	
+	
+
+	public function dicevalid(dx:Int,dy:Int):Bool{
+		for (pattern in outlines){
+			var valid=true;
+			for (i in 0...3){
+				for (j in 0...3){
+					var cx = 3*dx+i;
+					var cy = 3*dy+j;
+					var pi = brett.hasPunktIgnoreSelected(cx,cy,selectedIndex);
+					var p:Bool = pi>=0;
+					var pattern_p:Bool = pattern.charAt(j*3+i)=="O";
+					if (pattern_p!=p){
+						valid=false;
+					}
+				}
+			}
+			if (valid){
+				return true;
+			}
+		}
+		return false;
+	}
+
+	function checkEndGame(){
+/*
+I don't know what 
+I was thinking
+Asking you to piece together
+dice faces.
+
+I don't know if it was a good idea
+but it was an idea.
+
+I hope that if you played you had fun
+and if you didn't that you didn't do so out of
+anticipation that something enjoyable
+might happen.
+
+That's a bad rule for games
+and a bad rule for life.
+
+--
+
+Was meinte ich?
+Ich weiß nicht.
+Ich versuchte etwas nicht so schwierig zu machen.
+*/
+	}
+
+	private static var DEVMODE:Bool=false;
+
 	function update() {	
 		Gfx.drawimage(0,0,"bg");
 
-		if (Input.justpressed(Key.E)){
+		if (Input.justpressed(Key.N)){
+			Save.delete();	
+			Globals.state.solved[0]=0;
+			Globals.state.solved[1]=0;
+			Globals.state.solved[2]=0;
+			Globals.state.solved[3]=0;
+			Globals.state.solved[4]=0;
+			Globals.state.solved[5]=0;	
+		}
+
+		if (DEVMODE&&Input.justpressed(Key.O)){
+			Globals.state.solved[Globals.state.level]=1;
+		}
+		
+		if (DEVMODE&&Input.justpressed(Key.E)){
 			editmode=!editmode;			
 			if (editmode==false){
 				lastselected=-1;
 			}
+		}
+		if (DEVMODE&&Input.justpressed(Key.N)){
+			brett = new Brett();
+			lastselected=-1;
+			saveUndoState();
 		}
 
 		if (editmode){
 			Text.display(1,1,"E",0xffffff);
 		}
 
+		if (DEVMODE&&Input.justpressed(Key.S)){
+			var s = brett.ToString();
+			js.Browser.alert(s);
+			trace(s);
+		}
+		if (DEVMODE&&Input.justpressed(Key.H)){
+			brett.shuffle();
+			saveUndoState();
+		}
+		if (Input.justpressed(Key.Z)){
+			doUndo();
+		}
 		var t_x=20;
 		var t_y=37;
 
 
-		var title_s = solved 
+		var title_s = solved && !allsolved
 			? Globals.S("Die Würfel sind richtig.","The dice are right!") 
 			: Globals.S("Die Würfel sind falsch!","The dice are wrong.")
 			;
-			
+
+		if (allsolved){
+			Text.wordwrap=136;
+			Text.display(19,64,
+			Globals.S("Aber was bedeutet es, Würfelflächen so zu basteln?  
+	Würfelzählen, die nicht zufällig geschehen, sind FALSCH.
+	Zahlen von Würfel müssen aus Zufälligkeit entstehen.
+	Das sind keine Würfel, das sind Wegwürfeln!
+
+	Ihre Würfelerlaubnis ist für immer widerrufen worden."
+				,
+				"What does it mean to make dice faces like this?
+	Dice faces that do not occur by chance are WRONG.
+	Dice faces must result from a random process.
+	These are no dice! You have done wrong!
+
+	YOU HAVE BEEN BANNED FOREVER FROM MODIFYING DICE.
+	THE END."
+			),0x47656c);
+			Text.wordwrap=0;
+		}
+
 
 		Text.display(t_x,t_y,title_s,0x47656c);	
 
+	
 
-		for (i in 0...3){
-			for (j in 0...3){
-				Gfx.drawimage(feld_x+48*i,feld_y+48*j,"diceface");
+
+		var oldallsolved=allsolved;
+		
+		allsolved = 
+				Globals.state.solved[0]==1 &&
+				Globals.state.solved[1]==1 &&
+				Globals.state.solved[2]==1 &&
+				Globals.state.solved[3]==1 &&
+				Globals.state.solved[4]==1 &&
+				Globals.state.solved[5]==1 ;
+
+	
+		var off_x = Main.feld_x-1;
+		var off_y = Main.feld_y-1;
+
+//144,13
+		var newbuttonstate = IMGUI.togglebutton(
+			"audio",
+			"button",
+			"button_pressed",
+			"button_audio_stumm",
+			"button_audio_on",
+			144,
+			11,
+			Globals.state.audio==0 ?false:true
+		);
+		if ((Globals.state.audio==1)!=newbuttonstate){
+			Globals.state.audio = newbuttonstate?1:0;
+			Save.savevalue("audio",Globals.state.audio);
+		}
+	
+		newbuttonstate = IMGUI.togglebutton(
+			"sprache",
+			"button",
+			"button_pressed",
+			"button_flagge_de",
+			"button_flagge_en",
+			144,
+			32,
+			Globals.state.sprache==0 ?false:true
+		);
+		if ( (Globals.state.sprache==1)!=newbuttonstate){
+			Globals.state.sprache = newbuttonstate?1:0;
+			Save.savevalue("sprache",Globals.state.sprache);
+		}
+	
+	//13,219
+		var linkspressed = IMGUI.pressbutton(
+			"links",
+			"button",
+			"button_pressed",
+			"button_pfeil_links",
+			13,
+			214
+		) || Input.justpressed(Key.LEFT);
+
+
+	//144,219
+
+		var rechtspressed = IMGUI.pressbutton(
+			"rechts",
+			"button",
+			"button_pressed",
+			"button_pfeil_rechts",
+			144,
+			214
+		) || Input.justpressed(Key.RIGHT);
+
+		if (linkspressed){
+			if (Globals.state.level>0){
+				playSound(72280307);
+				Globals.state.level--;
+				Save.savevalue("level",Globals.state.level);
+				LoadLevel(Globals.state.level);	
+			}
+		}
+		if (rechtspressed){
+			if (Globals.state.level<5){
+				playSound(72280307);
+				Globals.state.level++;
+				Save.savevalue("level",Globals.state.level);
+				LoadLevel(Globals.state.level);	
+			}
+		}
+//38,218, 54
+		for (stern_index in 0...6){
+			var x = 38+16*stern_index;
+			var y = 213;
+			Gfx.drawimage(
+				x,
+				y,
+				Globals.state.solved[stern_index]==1? "stern_default":"stern_leer"
+				);
+
+			if (stern_index==Globals.state.level){
+				Gfx.drawimage(x,y,"stern_outline");
 			}
 		}
 
-		var off_x = Main.feld_x-1;
-		var off_y = Main.feld_y-1;
+		var validcount=0;
+		for (i in 0...3){
+			for (j in 0...3){
+				if (dicevalid(i,j)){
+					validcount++;
+					if (!allsolved){
+						Gfx.drawimage(feld_x+48*i,feld_y+48*j,"diceface");
+					}
+				} else {
+					if (!allsolved){
+						Gfx.drawimage(feld_x+48*i,feld_y+48*j,"dicefaceempty");
+					}
+				}
+			}
+		}
+
+		if (allsolved!=oldallsolved){
+			playSound(34693703);
+		}
+		if (allsolved){
+			return;
+		}
+		
+
+		if (validcount==9){
+			if (solved==false){
+				playSound(38133907);
+			}
+			solved=true;							
+			Globals.state.solved[Globals.state.level]=1;		
+			Save.savevalue("solved"+Globals.state.level,1);
+			checkEndGame();
+		} else {
+			solved=false;
+		}
 
 		if (editmode){
 			if (lastselected>=0){
@@ -853,7 +1265,8 @@ class Main {
 
 		var mx = Math.floor((Mouse.x-off_x)/tile_s);
 		var my = Math.floor((Mouse.y-off_y)/tile_s);
-		var clicked = Mouse.leftclick();
+		var clicked = Mouse.leftclick() && !(Input.pressed(Key.SHIFT)||Input.pressed(CONTROL));
+		var rclicked = Mouse.rightclick() || (Mouse.leftclick() && (Input.pressed(Key.SHIFT)||Input.pressed(CONTROL)));
 		// var released = Mouse.leftreleased();
 		
 		
@@ -866,6 +1279,7 @@ class Main {
 				if (clicked){
 					if (selectedIndex==-1 && editmode==false){
 						selectedIndex = i;
+						playSound(45902700);
 						lastselected = i;
 						selected_x_offset = stueck.posx-mx;
 						selected_y_offset = stueck.posy-my;
@@ -937,7 +1351,9 @@ class Main {
 			}
 			if (anyoverlaps==false && alreadyselected==true){
 				if (clicked){
+					playSound(34980300);
 					selectedIndex=-1;
+					saveUndoState();
 				}
 			}
 		}
@@ -951,22 +1367,34 @@ class Main {
 			// Gfx.drawtile(px,py,"dice_highlighted",ci);
 			Gfx.drawimage(px,py,"cursor");
 
+			if (editmode && rclicked){
+				var i:Int=0;
+				while (i<brett.stuecke.length){
+					var stueck = brett.stuecke[i];
+					if (stueck.hasPunkt(mx,my)){
+						lastselected=i;
+						saveUndoState();
+					}
+					i++;
+				}
+			}
+
 			if (editmode && clicked){
 				var anyfound=false;
 				//if it's part of an existing piece, delete it
 
 				var i:Int=0;
 				while (i<brett.stuecke.length){
-					var stueck = brett.stuecke[i];
+						var stueck = brett.stuecke[i];
+						trace(stueck);
 					if (stueck.hasPunkt(mx,my)){
 						anyfound=true;
 						stueck.removePunkt(mx,my);
 						if (stueck.mask.length==0){
 							brett.stuecke.splice(i,1);
-							if (lastselected==i){
+							if (lastselected==i || lastselected>=brett.stuecke.length){
 								lastselected=-1;
-							}
-							i--;
+							}//don't need to decrement
 							continue;
 						}
 						stueck.recalc();
@@ -975,101 +1403,27 @@ class Main {
 				}
 
 				if (anyfound==false) {
-					if (lastselected==-1){
+					var stueck = brett.stuecke[lastselected];					
+
+					if (lastselected==-1 || stueck.neighbouring(mx,my)==false){
 						var s:Stuck = new Stuck();
 						s.posx=mx;
 						s.posy=my;
 						s.mask=["O"];
 						s.recalc();
 						brett.stuecke.push(s);
+						lastselected=brett.stuecke.length-1;
 					} else {
-						var stueck = brett.stuecke[lastselected];
 						stueck.addPunkt(mx,my);
 					}
 				}
+
+				saveUndoState();
 			}
 
 		}
 
-		//144,13
-		var newbuttonstate = IMGUI.togglebutton(
-			"audio",
-			"button",
-			"button_pressed",
-			"button_audio_stumm",
-			"button_audio_on",
-			144,
-			11,
-			Globals.state.audio==0 ?false:true
-		);
-		if ((Globals.state.audio==1)!=newbuttonstate){
-			Globals.state.audio = newbuttonstate?1:0;
-			Save.savevalue("audio",Globals.state.audio);
-		}
-	
-		newbuttonstate = IMGUI.togglebutton(
-			"sprache",
-			"button",
-			"button_pressed",
-			"button_flagge_de",
-			"button_flagge_en",
-			144,
-			32,
-			Globals.state.sprache==0 ?false:true
-		);
-		if ( (Globals.state.sprache==1)!=newbuttonstate){
-			Globals.state.sprache = newbuttonstate?1:0;
-			Save.savevalue("sprache",Globals.state.sprache);
-		}
-	
-	//13,219
-		var linkspressed = IMGUI.pressbutton(
-			"links",
-			"button",
-			"button_pressed",
-			"button_pfeil_links",
-			13,
-			214
-		);
+		
 
-
-	//144,219
-
-		var rechtspressed = IMGUI.pressbutton(
-			"rechts",
-			"button",
-			"button_pressed",
-			"button_pfeil_rechts",
-			144,
-			214
-		);
-		if (linkspressed){
-			if (Globals.state.level>0){
-				Globals.state.level--;
-				Save.savevalue("level",Globals.state.level);
-				LoadLevel(Globals.state.level);	
-			}
-		}
-		if (rechtspressed){
-			if (Globals.state.level<5){
-				Globals.state.level++;
-				Save.savevalue("level",Globals.state.level);
-				LoadLevel(Globals.state.level);	
-			}
-		}
-//38,218, 54
-		for (stern_index in 0...6){
-			var x = 38+16*stern_index;
-			var y = 213;
-			Gfx.drawimage(
-				x,
-				y,
-				Globals.state.solved[stern_index]==1? "stern_default":"stern_leer"
-				);
-
-			if (stern_index==Globals.state.level){
-				Gfx.drawimage(x,y,"stern_outline");
-			}
-		}
 	}
 }
